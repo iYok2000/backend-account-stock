@@ -13,6 +13,13 @@ import (
 )
 
 func main() {
+	// Production: refuse to start with dev JWT secret
+	if os.Getenv("APP_ENV") == "production" {
+		secret := os.Getenv("JWT_SECRET")
+		if secret == "" || secret == "dev-secret-change-in-production" {
+			log.Fatal("production requires JWT_SECRET to be set and not the dev default")
+		}
+	}
 	jwtCfg := auth.DefaultJWTConfig()
 
 	// Connect to DB when DATABASE_URL or SUPABASE_DB_URL is set (Postgres / Supabase)
@@ -36,6 +43,9 @@ func main() {
 		w.Write([]byte(`{"status":"ok"}`))
 	})
 
+	// API: import — stub for frontend Import Wizard (CORS needed for browser)
+	mux.HandleFunc("/api/import/order-transaction", handler.ImportOrderTransaction)
+
 	// API: auth — /api/auth/me requires valid JWT
 	apiAuth := http.NewServeMux()
 	apiAuth.HandleFunc("/me", middleware.RequireAuthContext(handler.Me))
@@ -52,9 +62,13 @@ func main() {
 	usersChain := middleware.Auth(jwtCfg)(middleware.RequirePermission(rbac.PermUsersRead)(usersHandler))
 	mux.Handle("/api/users", usersChain)
 
-	addr := ":8080"
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	addr := ":" + port
 	log.Printf("server listening on %s", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	if err := http.ListenAndServe(addr, middleware.CORS(mux)); err != nil {
 		log.Fatal(err)
 	}
 }

@@ -13,7 +13,9 @@ go mod tidy   # if needed
 go run ./cmd/server
 ```
 
-Server listens on `:8080`.
+Server listens on `PORT` (default `8080`). For production build: `go build -o server ./cmd/server` then `./server`. See **`docs/DEPLOY.md`** for deploy checklist.
+
+**CORS (เรียกจาก frontend):** ตั้ง `CORS_ORIGIN` ให้ตรงกับ URL ที่เปิดหน้าบ้าน (เช่น `http://localhost:3000,http://127.0.0.1:3000`). ว่าง = อนุญาต localhost/127.0.0.1 ทุกพอร์ต. Go ไม่โหลด `.env` อัตโนมัติ — copy `.env.example` เป็น `.env` แล้วรัน: `set -a && source .env && set +a && go run ./cmd/server` (หรือ export ใน shell).
 
 ## Database (PostgreSQL or Supabase)
 
