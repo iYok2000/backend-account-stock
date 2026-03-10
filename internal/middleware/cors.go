@@ -13,9 +13,12 @@ func CORS(next http.Handler) http.Handler {
 	if allowed == "" {
 		allowed = "http://localhost:3000,http://127.0.0.1:3000"
 	}
+	// Remove surrounding quotes if present (Railway/other platforms may include them)
+	allowed = strings.Trim(allowed, `"'`)
 	origins := strings.Split(allowed, ",")
 	for i := range origins {
 		origins[i] = strings.TrimSpace(origins[i])
+		origins[i] = strings.Trim(origins[i], `"'`) // Also trim quotes from individual origins
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		origin := r.Header.Get("Origin")
