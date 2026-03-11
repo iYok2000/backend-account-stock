@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"log"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -17,16 +16,16 @@ import (
 	"account-stock-be/internal/rbac"
 )
 
-func init() {
-	// Force IPv4 (Railway + Supabase issue)
-	net.DefaultResolver = &net.Resolver{
-		PreferGo: true,
-		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-			d := net.Dialer{}
-			return d.DialContext(ctx, "tcp4", address)
-		},
-	}
-}
+// func init() {
+// 	// Force IPv4 (Railway + Supabase issue)
+// 	net.DefaultResolver = &net.Resolver{
+// 		PreferGo: true,
+// 		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+// 			d := net.Dialer{}
+// 			return d.DialContext(ctx, "tcp4", address)
+// 		},
+// 	}
+// }
 
 func main() {
 

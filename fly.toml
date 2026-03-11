@@ -1,10 +1,10 @@
-# fly.toml app configuration file generated for app-falling-shape-1071 on 2026-03-11T04:58:00Z
+# fly.toml app configuration file generated for backend-account-stock on 2026-03-11T12:00:00Z
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
-app = 'app-falling-shape-1071'
-primary_region = 'iad'
+app = 'backend-account-stock'
+primary_region = 'sin'
 
 [build]
 
