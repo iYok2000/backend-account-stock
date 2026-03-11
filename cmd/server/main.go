@@ -16,10 +16,12 @@ import (
 
 func init() {
 	// Force IPv4 only (Railway/Supabase connectivity issue with IPv6)
-	net.DefaultResolver.PreferGo = true
-	net.DefaultResolver.Dial = func(ctx context.Context, network, address string) (net.Conn, error) {
-		d := net.Dialer{}
-		return d.DialContext(ctx, "tcp4", address)
+	net.DefaultResolver = &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			d := net.Dialer{}
+			return d.DialContext(ctx, "tcp4", address)
+		},
 	}
 }
 
