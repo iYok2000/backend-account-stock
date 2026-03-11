@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"log"
+	"net"
 	"net/http"
 	"os"
 
@@ -11,6 +13,15 @@ import (
 	"account-stock-be/internal/middleware"
 	"account-stock-be/internal/rbac"
 )
+
+func init() {
+	// Force IPv4 only (Railway/Supabase connectivity issue with IPv6)
+	net.DefaultResolver.PreferGo = true
+	net.DefaultResolver.Dial = func(ctx context.Context, network, address string) (net.Conn, error) {
+		d := net.Dialer{}
+		return d.DialContext(ctx, "tcp4", address)
+	}
+}
 
 func main() {
 	// Production: refuse to start with dev JWT secret
