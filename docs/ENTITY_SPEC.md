@@ -1,7 +1,7 @@
 # Entity Spec — Shop, User และการ inject tenant (shop_id)
 
 Spec สำหรับ **entity ฝั่ง backend** และกฎ **tenant injection** (scope ตาม shop_id). อ่านก่อน implement ฟีเจอร์ที่เกี่ยวกับ user/shop หรือข้อมูลแยกตามร้าน. สอดคล้องกับ `account-stock-fe/docs/USER_SPEC.md`, `docs/SHOPS_AND_ROLES_SPEC.md` และ `project-specific_context.md`.
-
+test
 ---
 
 ## 1. Scope
