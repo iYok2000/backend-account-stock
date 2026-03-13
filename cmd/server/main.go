@@ -307,6 +307,24 @@ func main() {
 
 	mux.Handle("/api/analytics/product-metrics", analyticsProducts)
 
+	analyticsTrends :=
+		middleware.Auth(jwtCfg)(
+			middleware.Tenant(
+				middleware.RequirePermission(rbac.PermAnalyticsRead)(http.HandlerFunc(handler.AnalyticsTrends)),
+			),
+		)
+
+	mux.Handle("/api/analytics/trends", analyticsTrends)
+
+	analyticsProfitability :=
+		middleware.Auth(jwtCfg)(
+			middleware.Tenant(
+				middleware.RequirePermission(rbac.PermAnalyticsRead)(http.HandlerFunc(handler.AnalyticsProfitability)),
+			),
+		)
+
+	mux.Handle("/api/analytics/profitability", analyticsProfitability)
+
 	// -----------------------------
 	// HTTP Server
 	// -----------------------------

@@ -10,6 +10,7 @@ import (
 	"account-stock-be/internal/middleware"
 	"account-stock-be/internal/model"
 	"account-stock-be/internal/rbac"
+
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -39,11 +40,9 @@ func updateSelf(w http.ResponseWriter, r *http.Request) {
 		middleware.WriteJSONError(w, middleware.ErrUnauthorized, http.StatusUnauthorized)
 		return
 	}
-	// Permission: allow Root always, otherwise need users:update
-	if ctx.Role != auth.RoleRoot && !rbac.HasPermission(ctx.Permissions, rbac.PermUsersUpdate) {
-		middleware.WriteJSONError(w, middleware.ErrForbidden, http.StatusForbidden)
-		return
-	}
+	// NOTE: /api/users/me allows ANY authenticated user to update their own profile.
+	// No special permission required — this is self-service, not managing other users.
+	// The users:update permission is for managing OTHER shop members (SuperAdmin/Admin only).
 
 	var body updateSelfRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -90,6 +89,9 @@ func deleteSelf(w http.ResponseWriter, r *http.Request) {
 		middleware.WriteJSONError(w, middleware.ErrUnauthorized, http.StatusUnauthorized)
 		return
 	}
+	// NOTE: Self-deletion (account termination) requires explicit permission.
+	// This is a destructive action that may cascade to shop data (for SuperAdmin).
+	// Require users:delete permission for safety.
 	if ctx.Role != auth.RoleRoot && !rbac.HasPermission(ctx.Permissions, rbac.PermUsersDelete) {
 		middleware.WriteJSONError(w, middleware.ErrForbidden, http.StatusForbidden)
 		return
