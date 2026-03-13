@@ -19,6 +19,7 @@
 | [01-auth.md](./01-auth.md) | Auth / session | `GET /api/auth/me` |
 | [02-users.md](./02-users.md) | จัดการผู้ใช้ (SuperAdmin) | `GET /api/users` (และ CRUD เมื่อมี) |
 | [03-import.md](./03-import.md) | Import → Inventory | `POST /api/inventory/import`, `GET /api/inventory`, `GET /api/inventory/summary` (Auth + inventory:create/read) |
+| [06-invites.md](./06-invites.md) | Invite System (Tier) | `POST /api/invite/validate`, `/api/admin/invites`, `/api/admin/system-config` (Public, Auth, Admin) |
 
 ฟีเจอร์อื่น (inventory, orders, suppliers, …) จะเพิ่มเมื่อมี endpoint นั้นใน backend.
 

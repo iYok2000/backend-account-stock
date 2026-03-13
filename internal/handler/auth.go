@@ -16,18 +16,22 @@ const defaultRootCompanyID = "YPC"
 const defaultRootShopID = "00000000-0000-0000-0000-000000000001" // UUID string to match import_sku_row.shop_id (uuid)
 const defaultRootShopName = "YPC Affiliate"
 
-// MeResponse matches frontend AuthContext / useUserContext (SHOPS_AND_ROLES_SPEC).
+// MeResponse matches frontend AuthContext / useUserContext (SHOPS_AND_ROLES_SPEC, USER_SPEC).
 type MeResponse struct {
 	User struct {
 		ID          string `json:"id"`
 		DisplayName string `json:"displayName,omitempty"`
 	} `json:"user"`
-	Roles       []string `json:"roles"`
-	Permissions []string `json:"permissions"`
-	Tier        string   `json:"tier,omitempty"`
-	CompanyID   string   `json:"company_id,omitempty"`
-	ShopID      *string  `json:"shop_id,omitempty"`
-	ShopName    string   `json:"shop_name,omitempty"`
+	Roles          []string `json:"roles"`
+	Permissions    []string `json:"permissions"`
+	Tier           string   `json:"tier,omitempty"`
+	TierStartedAt  *string  `json:"tier_started_at,omitempty"`
+	TierExpiresAt  *string  `json:"tier_expires_at,omitempty"`
+	InviteCodeUsed *string  `json:"invite_code_used,omitempty"`
+	InviteSlots    int      `json:"invite_slots"`
+	CompanyID      string   `json:"company_id,omitempty"`
+	ShopID         *string  `json:"shop_id,omitempty"`
+	ShopName       string   `json:"shop_name,omitempty"`
 }
 
 // Me handles GET /api/auth/me — returns current user context for frontend AuthContext.
@@ -48,6 +52,29 @@ func Me(w http.ResponseWriter, r *http.Request) {
 		res.ShopID = &ctx.ShopID
 	}
 	res.ShopName = ctx.ShopName
+
+	// Look up user from DB for tier tracking fields (USER_SPEC)
+	if ctx.UserID != "" && ctx.UserID != "root" {
+		db := database.DB()
+		if db != nil {
+			var user model.User
+			if err := db.Where("id = ?", ctx.UserID).First(&user).Error; err == nil {
+				if user.TierStartedAt != nil {
+					ts := user.TierStartedAt.Format("2006-01-02T15:04:05Z07:00")
+					res.TierStartedAt = &ts
+				}
+				if user.TierExpiresAt != nil {
+					ts := user.TierExpiresAt.Format("2006-01-02T15:04:05Z07:00")
+					res.TierExpiresAt = &ts
+				}
+				if user.InviteCodeUsed != "" {
+					res.InviteCodeUsed = &user.InviteCodeUsed
+				}
+				res.InviteSlots = user.InviteSlots
+			}
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(res)
 }
@@ -100,17 +127,14 @@ func Login(w http.ResponseWriter, r *http.Request, jwtCfg auth.JWTConfig) {
 			middleware.WriteJSONError(w, middleware.ErrUnauthorized, http.StatusUnauthorized)
 			return
 		}
-		// Ensure default company/shop exist so Root has scoped shop data for dashboard/inventory
-		if db := database.DB(); db != nil {
-			_, _, _ = ensureRootDefaultShop(db)
-		}
+		// Root has NO shop_id — platform-only account (SHOPS_AND_ROLES_SPEC §1, §6)
 		claims := &auth.Claims{}
 		claims.Subject = "root"
 		claims.Role = string(auth.RoleRoot)
 		claims.Tier = string(auth.TierFree)
-		claims.CompanyID = defaultRootCompanyID
-		claims.ShopID = defaultRootShopID
-		claims.ShopName = defaultRootShopName
+		claims.CompanyID = ""
+		claims.ShopID = ""
+		claims.ShopName = ""
 		claims.DisplayName = "Root"
 		token, err := auth.IssueToken(jwtCfg, claims)
 		if err != nil {

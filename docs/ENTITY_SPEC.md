@@ -37,13 +37,64 @@ Spec สำหรับ **entity ฝั่ง backend** และกฎ **tenant
 | `display_name` | VARCHAR(256) | nullable | |
 | `role` | VARCHAR(32) | NOT NULL | Root \| SuperAdmin \| Admin \| Affiliate |
 | `tier` | VARCHAR(16) | NOT NULL | free / paid |
+| `tier_started_at` | TIMESTAMPTZ | nullable | เริ่มต้น tier ปัจจุบัน (จาก invite) |
+| `tier_expires_at` | TIMESTAMPTZ | nullable | หมดอายุ (null = unlimited) |
+| `invite_code_used` | VARCHAR(36) | nullable | invite code ที่ใช้ล่าสุด |
+| `invite_slots` | INT | NOT NULL, default 0 | จำนวนเชิญที่เหลือ (สำหรับ referral) |
 | `created_at` | TIMESTAMPTZ | NOT NULL | |
 | `updated_at` | TIMESTAMPTZ | NOT NULL | |
 | `deleted_at` | TIMESTAMPTZ | nullable | soft delete |
 
 - **เป็น tenant-scoped (shop):** ทุก query/update ที่เกี่ยวกับข้อมูลร้านต้อง filter ตาม `shop_id` ที่ได้จาก **auth context** เท่านั้น. Root มี shop_id = null.
 
-### 2.3 Company (legacy)
+### 2.3 InviteCode (tier management)
+
+| ฟิลด์ | Type | ข้อกำหนด | หมายเหตุ |
+|--------|------|-----------|----------|
+| `id` | VARCHAR(36) | PK, NOT NULL | UUID |
+| `code` | VARCHAR(64) | unique, NOT NULL | "STOCK-XXXXXX" (6 chars A-Z0-9) |
+| `grant_tier` | VARCHAR(16) | NOT NULL | "free" / "paid" ที่จะให้เมื่อใช้ code |
+| `tier_duration_days` | INT | nullable | จำนวนวัน (null = unlimited) |
+| `max_uses` | INT | nullable | จำนวนครั้งใช้ได้สูงสุด (null = unlimited) |
+| `used_count` | INT | NOT NULL, default 0 | นับจำนวนครั้งที่ใช้แล้ว |
+| `is_active` | BOOLEAN | NOT NULL, default true | สถานะ (ปิด/เปิด โดย admin) |
+| `expires_at` | TIMESTAMPTZ | nullable | หมดอายุ code เอง (null = no expiry) |
+| `description` | TEXT | nullable | หมายเหตุจาก admin |
+| `created_at` | TIMESTAMPTZ | NOT NULL | |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | |
+
+- **ไม่ tenant-scoped** — invite code ใช้ได้ทั่วระบบ (Root/SuperAdmin สร้าง).
+
+### 2.4 TierHistory (audit log)
+
+| ฟิลด์ | Type | ข้อกำหนด | หมายเหตุ |
+|--------|------|-----------|----------|
+| `id` | BIGSERIAL | PK, NOT NULL | auto-increment |
+| `user_id` | VARCHAR(36) | NOT NULL, FK → users.id | ผู้ใช้ที่เปลี่ยน tier |
+| `old_tier` | VARCHAR(16) | NOT NULL | tier ก่อนเปลี่ยน |
+| `new_tier` | VARCHAR(16) | NOT NULL | tier หลังเปลี่ยน |
+| `reason` | VARCHAR(64) | NOT NULL | "invite_code" / "admin_grant" / "expired" |
+| `invite_code_id` | VARCHAR(36) | nullable, FK → invite_codes.id | ถ้าเปลี่ยนจาก code |
+| `started_at` | TIMESTAMPTZ | NOT NULL | วันที่เริ่ม tier ใหม่ |
+| `expires_at` | TIMESTAMPTZ | nullable | วันหมดอายุ (null = unlimited) |
+| `created_at` | TIMESTAMPTZ | NOT NULL | เวลาที่บันทึก |
+
+- **tenant-scoped (ผ่าน user)** — filter ตาม user.shop_id เมื่อ query history.
+
+### 2.5 SystemConfig (global settings)
+
+| ฟิลด์ | Type | ข้อกำหนด | หมายเหตุ |
+|--------|------|-----------|----------|
+| `id` | BIGSERIAL | PK, NOT NULL | auto-increment |
+| `key` | VARCHAR(128) | unique, NOT NULL | เช่น "require_invite_code" |
+| `value` | TEXT | NOT NULL | JSON string หรือ plain text |
+| `description` | TEXT | nullable | อธิบาย setting |
+| `created_at` | TIMESTAMPTZ | NOT NULL | |
+| `updated_at` | TIMESTAMPTZ | NOT NULL | |
+
+- **ไม่ tenant-scoped** — global config (Root only).
+
+### 2.6 Company (legacy)
 
 - ตาราง `companies` ยังมีอยู่ได้สำหรับ legacy; ใช้ `shops` เป็น tenant หลัก.
 
@@ -52,22 +103,47 @@ Spec สำหรับ **entity ฝั่ง backend** และกฎ **tenant
 ## 3. ER (ความสัมพันธ์)
 
 ```
-┌─────────────────┐         ┌─────────────────┐
-│     shops       │         │      users      │
-├─────────────────┤         ├─────────────────┤
-│ id (PK)         │◄────────│ shop_id (FK)    │  nullable (Root)
-│ name            │    1  * │ id (PK)         │
-│ created_at      │         │ email (unique)  │
-│ updated_at      │         │ password_hash   │
-│ deleted_at      │         │ display_name    │
-└─────────────────┘         │ role, tier      │
-                             │ created_at      │
-                             │ updated_at      │
-                             │ deleted_at      │
-                             └─────────────────┘
+┌─────────────────┐         ┌─────────────────────────┐         ┌────────────────┐
+│     shops       │         │        users            │         │ invite_codes   │
+├─────────────────┤         ├─────────────────────────┤         ├────────────────┤
+│ id (PK)         │◄────────│ shop_id (FK)            │         │ id (PK)        │
+│ name            │    1  * │ id (PK)                 │         │ code (unique)  │
+│ created_at      │         │ email (unique)          │         │ grant_tier     │
+│ updated_at      │         │ password_hash           │         │ max_uses       │
+│ deleted_at      │         │ display_name            │         │ used_count     │
+└─────────────────┘         │ role, tier              │         │ is_active      │
+                             │ tier_started_at         │         │ expires_at     │
+                             │ tier_expires_at         │         └────────────────┘
+                             │ invite_code_used        │──────┐          │
+                             │ invite_slots            │      │          │
+                             │ created_at, updated_at  │      │          │
+                             │ deleted_at              │      │          │
+                             └─────────────────────────┘      │          │
+                                      │                        │          │
+                                      │ 1                      │          │
+                                      │                        │          │
+                                      │ *                      │          │
+                                      ▼                        ▼          │
+                             ┌────────────────────┐    ┌──────▼──────────▼─┐
+                             │   tier_history     │    │  system_config    │
+                             ├────────────────────┤    ├───────────────────┤
+                             │ id (PK)            │    │ id (PK)           │
+                             │ user_id (FK)       │    │ key (unique)      │
+                             │ old_tier→new_tier  │    │ value             │
+                             │ reason             │    │ description       │
+                             │ invite_code_id (FK)│    │ created_at        │
+                             │ started_at         │    │ updated_at        │
+                             │ expires_at         │    └───────────────────┘
+                             │ created_at         │
+                             └────────────────────┘
 ```
 
+### ความสัมพันธ์
+
 - **Shop 1 — * User:** User หนึ่งคนสังกัดร้านเดียว (`users.shop_id` → `shops.id`). Root มี shop_id = null.
+- **User 1 — * TierHistory:** ประวัติการเปลี่ยน tier ของแต่ละ user (`tier_history.user_id` → `users.id`).
+- **InviteCode 1 — * TierHistory:** เมื่อใช้ invite code ให้สร้าง tier_history (`tier_history.invite_code_id` → `invite_codes.id`).
+- **SystemConfig:** ไม่มี FK — เป็นตาราง config แบบ key-value (เช่น `require_invite_code = "true"`).
 - ตารางอื่นที่แยกตามร้านในอนาคต (เช่น inventory, orders) ต้องมี `shop_id` และ scope ตาม auth context.
 
 ---
@@ -88,6 +164,9 @@ Spec สำหรับ **entity ฝั่ง backend** และกฎ **tenant
 |--------|------------|----------|
 | `shops` | ไม่มี | เป็นตัว tenant เอง |
 | `users` | มี (nullable สำหรับ Root) | scope ตาม shop ที่ user สังกัด |
+| `tier_history` | ทาง user | filter ตาม user.shop_id เมื่อ query history |
+| `invite_codes` | ไม่มี | ใช้ได้ทั่วระบบ (Root/SuperAdmin สร้าง) |
+| `system_config` | ไม่มี | global config (Root only) |
 | (อนาคต) inventory, orders, … | มี | ต้องใช้ shop_id จาก auth context เท่านั้น |
 
 ---

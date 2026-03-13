@@ -69,6 +69,26 @@ Spec สำหรับ layer ฐานข้อมูลของ **account-sto
 
 (ถ้าไม่ต้องการตัวอย่าง `000002_add_user_phone` ใน repo สามารถลบ 000002 ออกและใช้เลขเวอร์ชันถัดไปสำหรับ migration จริง)
 
+### 3.3 Migrations ปัจจุบัน
+
+| เวอร์ชัน | ชื่อไฟล์ | คำอธิบาย |
+|----------|----------|----------|
+| 000001 | `init` | สร้างตาราง users, shops, companies (initial schema) |
+| 000002 | `add_user_phone` | เพิ่ม phone column (ตัวอย่าง — สามารถลบได้) |
+| 000003 | `shops_and_user_shop` | เพิ่ม shops table และ user.shop_id (multi-tenant) |
+| 000005 | `import_results` | สร้างตาราง import_results (order import tracking) |
+| 000006 | `import_sku_row` | สร้างตาราง import_sku_rows (SKU-level import data) |
+| **000015** | `invite_system` | **เพิ่ม invite_codes, tier_history, system_config; เพิ่มฟิลด์ tier tracking ใน users** |
+
+**Migration 000015 (Invite System):**
+- **ตาราง:**
+  - `invite_codes` — เก็บ invite codes (STOCK-XXXXXX) สำหรับควบคุม tier access
+  - `tier_history` — audit log การเปลี่ยน tier (old→new, reason, invite code used)
+  - `system_config` — key-value config (เช่น `require_invite_code`)
+- **แก้ไข users:**
+  - เพิ่ม `tier_started_at`, `tier_expires_at`, `invite_code_used`, `invite_slots`
+- **API:** ดู `docs/feature/06-invites.md` สำหรับ endpoint
+
 ---
 
 ## 4. Security (สอดคล้อง SECURITY.md)

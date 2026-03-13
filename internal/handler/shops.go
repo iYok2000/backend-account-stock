@@ -11,6 +11,7 @@ import (
 	"account-stock-be/internal/database"
 	"account-stock-be/internal/middleware"
 	"account-stock-be/internal/model"
+
 	"gorm.io/gorm"
 )
 
@@ -53,27 +54,30 @@ func CreateShops(w http.ResponseWriter, r *http.Request) {
 		middleware.WriteJSONError(w, "name required", http.StatusBadRequest)
 		return
 	}
-	if len(body.Members) > 0 {
-		hasSuperAdmin := false
-		roleAllow := map[string]bool{"SuperAdmin": true, "Admin": true, "Affiliate": true}
-		for _, m := range body.Members {
-			if !roleAllow[m.Role] {
-				middleware.WriteJSONError(w, "invalid role", http.StatusBadRequest)
-				return
-			}
-			em := strings.TrimSpace(m.Email)
-			if em == "" || m.Password == "" {
-				middleware.WriteJSONError(w, "email and password required for each member", http.StatusBadRequest)
-				return
-			}
-			if m.Role == "SuperAdmin" {
-				hasSuperAdmin = true
-			}
-		}
-		if !hasSuperAdmin {
-			middleware.WriteJSONError(w, "at least one member must be SuperAdmin", http.StatusBadRequest)
+	// SHOPS_AND_ROLES_SPEC §3: must have at least 1 member who is SuperAdmin
+	if len(body.Members) == 0 {
+		middleware.WriteJSONError(w, "at least one member (SuperAdmin) is required", http.StatusBadRequest)
+		return
+	}
+	hasSuperAdmin := false
+	roleAllow := map[string]bool{"SuperAdmin": true, "Admin": true, "Affiliate": true}
+	for _, m := range body.Members {
+		if !roleAllow[m.Role] {
+			middleware.WriteJSONError(w, "invalid role", http.StatusBadRequest)
 			return
 		}
+		em := strings.TrimSpace(m.Email)
+		if em == "" || m.Password == "" {
+			middleware.WriteJSONError(w, "email and password required for each member", http.StatusBadRequest)
+			return
+		}
+		if m.Role == "SuperAdmin" {
+			hasSuperAdmin = true
+		}
+	}
+	if !hasSuperAdmin {
+		middleware.WriteJSONError(w, "at least one member must be SuperAdmin", http.StatusBadRequest)
+		return
 	}
 
 	db := database.DB()

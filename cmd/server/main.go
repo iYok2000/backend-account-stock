@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/joho/godotenv"
+
 	"account-stock-be/internal/auth"
 	"account-stock-be/internal/database"
 	"account-stock-be/internal/handler"
@@ -28,6 +30,14 @@ import (
 // }
 
 func main() {
+
+	// -----------------------------
+	// Load .env (dev convenience — silently ignored if file missing)
+	// -----------------------------
+	// Try cwd first, then repo root (for `go run ./cmd/server` from root)
+	if err := godotenv.Load(); err != nil {
+		_ = godotenv.Load("../../.env")
+	}
 
 	// -----------------------------
 	// ENV Validation
@@ -85,6 +95,71 @@ func main() {
 			middleware.WriteJSONError(w, middleware.ErrMethodNotAllowed, http.StatusMethodNotAllowed)
 		}
 	})
+
+	// -----------------------------
+	// Invite System (Public + Admin)
+	// -----------------------------
+
+	// Public invite endpoints (no auth required)
+	mux.HandleFunc("/api/invite/validate", handler.ValidateInviteCode)
+	mux.HandleFunc("/api/invite/check-required", handler.CheckInviteRequired)
+
+	// Use invite code (authenticated)
+	inviteUse :=
+		middleware.Auth(jwtCfg)(
+			middleware.Tenant(http.HandlerFunc(handler.UseInviteCode)),
+		)
+	mux.Handle("/api/invite/use", inviteUse)
+
+	// Admin invite management
+	adminInvites :=
+		middleware.Auth(jwtCfg)(
+			middleware.Tenant(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case http.MethodGet:
+					handler.ListInviteCodes(w, r)
+				case http.MethodPost:
+					handler.CreateInviteCode(w, r)
+				default:
+					middleware.WriteJSONError(w, middleware.ErrMethodNotAllowed, http.StatusMethodNotAllowed)
+				}
+			})),
+		)
+	mux.Handle("/api/admin/invites", adminInvites)
+
+	// Admin invite update/delete (with ID parameter)
+	mux.HandleFunc("/api/admin/invites/", func(w http.ResponseWriter, r *http.Request) {
+		// Auth + Tenant middleware manually
+		authHandler := middleware.Auth(jwtCfg)(
+			middleware.Tenant(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case http.MethodPut, http.MethodPatch:
+					handler.UpdateInviteCode(w, r)
+				case http.MethodDelete:
+					handler.DeleteInviteCode(w, r)
+				default:
+					middleware.WriteJSONError(w, middleware.ErrMethodNotAllowed, http.StatusMethodNotAllowed)
+				}
+			})),
+		)
+		authHandler.ServeHTTP(w, r)
+	})
+
+	// Admin system config
+	adminConfig :=
+		middleware.Auth(jwtCfg)(
+			middleware.Tenant(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case http.MethodGet:
+					handler.GetSystemConfig(w, r)
+				case http.MethodPut, http.MethodPatch:
+					handler.UpdateSystemConfig(w, r)
+				default:
+					middleware.WriteJSONError(w, middleware.ErrMethodNotAllowed, http.StatusMethodNotAllowed)
+				}
+			})),
+		)
+	mux.Handle("/api/admin/system-config", adminConfig)
 
 	// -----------------------------
 	// Auth
@@ -173,14 +248,30 @@ func main() {
 
 	mux.Handle("/api/shops", shopsCreateChain)
 
+	// GET /api/shops/me — users:read (view shop + members)
+	// PATCH /api/shops/me — shops:update (edit shop name; SuperAdmin only)
 	shopsMeHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
 		switch r.Method {
 
 		case http.MethodGet:
+			// Permission check: users:read
+			if ctx := middleware.GetContext(r.Context()); ctx != nil {
+				if !rbac.HasPermission(ctx.Permissions, rbac.PermUsersRead) {
+					middleware.WriteJSONError(w, middleware.ErrForbidden, http.StatusForbidden)
+					return
+				}
+			}
 			handler.GetShopsMe(w, r)
 
 		case http.MethodPatch, http.MethodPut:
+			// Permission check: shops:update
+			if ctx := middleware.GetContext(r.Context()); ctx != nil {
+				if !rbac.HasPermission(ctx.Permissions, rbac.PermShopsUpdate) {
+					middleware.WriteJSONError(w, middleware.ErrForbidden, http.StatusForbidden)
+					return
+				}
+			}
 			handler.PatchShopsMe(w, r)
 
 		default:
@@ -192,9 +283,7 @@ func main() {
 
 	shopsMeChain :=
 		middleware.Auth(jwtCfg)(
-			middleware.Tenant(
-				middleware.RequirePermission(rbac.PermShopsUpdate)(shopsMeHandler),
-			),
+			middleware.Tenant(shopsMeHandler),
 		)
 
 	mux.Handle("/api/shops/me", shopsMeChain)

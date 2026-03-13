@@ -55,23 +55,24 @@ const (
 	PermUsersUpdate = "users:update"
 	PermUsersDelete = "users:delete"
 	PermUsersExport = "users:export"
+
+	PermInvitesRead   = "invites:read"
+	PermInvitesCreate = "invites:create"
+	PermInvitesUpdate = "invites:update"
+	PermInvitesDelete = "invites:delete"
+
+	PermConfigRead   = "config:read"
+	PermConfigUpdate = "config:update"
 )
 
 // rolePermissions maps role to permissions (SHOPS_AND_ROLES_SPEC, RBAC_SPEC §5).
 var rolePermissions = map[auth.Role][]string{
 	auth.RoleRoot: {
-		// Root = full access to all resources/actions
+		// Root = platform admin; dashboard + shop creation + invites + config (SHOPS_AND_ROLES_SPEC §1, RBAC_SPEC §5)
 		PermDashboardRead,
-		PermInventoryRead, PermInventoryCreate, PermInventoryUpdate, PermInventoryDelete, PermInventoryExport,
-		PermOrdersRead, PermOrdersCreate, PermOrdersUpdate, PermOrdersExport,
-		PermSuppliersRead, PermSuppliersCreate, PermSuppliersUpdate, PermSuppliersDelete,
-		PermShopsRead, PermShopsCreate, PermShopsUpdate, PermShopsDelete,
-		PermPromotionsRead, PermPromotionsCreate, PermPromotionsUpdate, PermPromotionsDelete, PermPromotionsExport,
-		PermAnalysisRead, PermAnalysisExport,
-		PermAgentsRead, PermAgentsCreate, PermAgentsUpdate, PermAgentsDelete,
-		PermAnalyticsRead,
-		PermSettingsRead, PermSettingsUpdate,
-		PermUsersRead, PermUsersCreate, PermUsersUpdate, PermUsersDelete, PermUsersExport,
+		PermShopsCreate,
+		PermInvitesRead, PermInvitesCreate, PermInvitesUpdate, PermInvitesDelete,
+		PermConfigRead, PermConfigUpdate,
 	},
 	auth.RoleAffiliate: {
 		PermDashboardRead,
@@ -80,6 +81,7 @@ var rolePermissions = map[auth.Role][]string{
 		PermAnalyticsRead,
 	},
 	auth.RoleAdmin: {
+		// Admin = all shop features EXCEPT users:* and shops:update (SHOPS_AND_ROLES_SPEC §1, RBAC_BACKEND_SPEC §4)
 		PermDashboardRead,
 		PermInventoryRead, PermInventoryCreate, PermInventoryUpdate, PermInventoryDelete, PermInventoryExport,
 		PermOrdersRead, PermOrdersCreate, PermOrdersUpdate, PermOrdersExport,
@@ -89,7 +91,6 @@ var rolePermissions = map[auth.Role][]string{
 		PermAnalysisRead, PermAnalysisExport,
 		PermAgentsRead, PermAgentsCreate, PermAgentsUpdate, PermAgentsDelete,
 		PermSettingsRead, PermSettingsUpdate,
-		PermUsersRead, PermUsersCreate, PermUsersUpdate, PermUsersDelete, PermUsersExport,
 	},
 	auth.RoleSuperAdmin: {
 		PermDashboardRead,
@@ -102,6 +103,7 @@ var rolePermissions = map[auth.Role][]string{
 		PermAgentsRead, PermAgentsCreate, PermAgentsUpdate, PermAgentsDelete,
 		PermSettingsRead, PermSettingsUpdate,
 		PermUsersRead, PermUsersCreate, PermUsersUpdate, PermUsersDelete, PermUsersExport,
+		PermInvitesRead, PermInvitesCreate, PermInvitesUpdate, PermInvitesDelete,
 	},
 }
 
