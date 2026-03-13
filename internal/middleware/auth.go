@@ -54,6 +54,10 @@ func Auth(cfg auth.JWTConfig) func(http.Handler) http.Handler {
 			if ctx.CompanyID == "" && ctx.ShopID != "" {
 				ctx.CompanyID = ctx.ShopID
 			}
+			// Root is superuser — assign default tenant scope so handlers don't reject
+			if role == auth.RoleRoot && ctx.CompanyID == "" {
+				ctx.CompanyID = "root"
+			}
 			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), authContextKey, ctx)))
 		})
 	}

@@ -24,9 +24,20 @@ func CORS(next http.Handler) http.Handler {
 		origin := r.Header.Get("Origin")
 		allowedOrigin := ""
 		for _, o := range origins {
-			if o != "" && (o == "*" || o == origin) {
+			if o == "" {
+				continue
+			}
+			if o == "*" || o == origin {
 				allowedOrigin = o
 				break
+			}
+			// Support wildcard subdomain pattern e.g. "https://*.vercel.app"
+			if strings.HasPrefix(o, "https://*.") {
+				suffix := o[len("https://*"):]
+				if strings.HasPrefix(origin, "https://") && strings.HasSuffix(origin, suffix) {
+					allowedOrigin = origin
+					break
+				}
 			}
 		}
 		// Dev: if CORS_ORIGIN unset and request from localhost/127.0.0.1, allow it (any port)

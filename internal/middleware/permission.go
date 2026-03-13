@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 
+	"account-stock-be/internal/auth"
 	"account-stock-be/internal/rbac"
 )
 
@@ -17,7 +18,8 @@ func RequirePermission(permission string) func(http.Handler) http.Handler {
 				writeJSONError(w, ErrUnauthorized, http.StatusUnauthorized)
 				return
 			}
-			if !rbac.HasPermission(ctx.Permissions, permission) {
+			// Root is superuser — bypass all permission checks
+			if ctx.Role != auth.RoleRoot && !rbac.HasPermission(ctx.Permissions, permission) {
 				writeJSONError(w, ErrForbidden, http.StatusForbidden)
 				return
 			}

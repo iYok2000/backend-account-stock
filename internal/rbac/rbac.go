@@ -68,9 +68,18 @@ const (
 // rolePermissions maps role to permissions (SHOPS_AND_ROLES_SPEC, RBAC_SPEC §5).
 var rolePermissions = map[auth.Role][]string{
 	auth.RoleRoot: {
-		// Root = platform admin; dashboard + shop creation + invites + config (SHOPS_AND_ROLES_SPEC §1, RBAC_SPEC §5)
+		// Root = superuser; has ALL permissions (platform-level access to everything)
 		PermDashboardRead,
-		PermShopsCreate,
+		PermInventoryRead, PermInventoryCreate, PermInventoryUpdate, PermInventoryDelete, PermInventoryExport,
+		PermOrdersRead, PermOrdersCreate, PermOrdersUpdate, PermOrdersExport,
+		PermSuppliersRead, PermSuppliersCreate, PermSuppliersUpdate, PermSuppliersDelete,
+		PermShopsRead, PermShopsCreate, PermShopsUpdate, PermShopsDelete,
+		PermPromotionsRead, PermPromotionsCreate, PermPromotionsUpdate, PermPromotionsDelete, PermPromotionsExport,
+		PermAnalysisRead, PermAnalysisExport,
+		PermAgentsRead, PermAgentsCreate, PermAgentsUpdate, PermAgentsDelete,
+		PermAnalyticsRead,
+		PermSettingsRead, PermSettingsUpdate,
+		PermUsersRead, PermUsersCreate, PermUsersUpdate, PermUsersDelete, PermUsersExport,
 		PermInvitesRead, PermInvitesCreate, PermInvitesUpdate, PermInvitesDelete,
 		PermConfigRead, PermConfigUpdate,
 	},
