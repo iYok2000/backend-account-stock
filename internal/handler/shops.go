@@ -82,7 +82,7 @@ func CreateShops(w http.ResponseWriter, r *http.Request) {
 
 	db := database.DB()
 	if db == nil {
-		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+		middleware.WriteJSONError(w, middleware.ErrServiceUnavailable, http.StatusServiceUnavailable)
 		return
 	}
 	companyID := newID()
@@ -122,7 +122,7 @@ func CreateShops(w http.ResponseWriter, r *http.Request) {
 			middleware.WriteJSONError(w, "email already exists", http.StatusBadRequest)
 			return
 		}
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -185,7 +185,7 @@ func GetShopsMe(w http.ResponseWriter, r *http.Request) {
 	}
 	db := database.DB()
 	if db == nil {
-		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+		middleware.WriteJSONError(w, middleware.ErrServiceUnavailable, http.StatusServiceUnavailable)
 		return
 	}
 	shopID := ctx.ShopID
@@ -195,7 +195,7 @@ func GetShopsMe(w http.ResponseWriter, r *http.Request) {
 		var err error
 		companyID, shopID, err = ensureRootDefaultShop(db)
 		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
 			return
 		}
 	}
@@ -206,7 +206,7 @@ func GetShopsMe(w http.ResponseWriter, r *http.Request) {
 	}
 	var users []model.User
 	if err := db.Where("shop_id = ? AND company_id = ?", shopID, companyID).Find(&users).Error; err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
 		return
 	}
 	members := make([]MemberItem, 0, len(users))
@@ -245,7 +245,7 @@ func PatchShopsMe(w http.ResponseWriter, r *http.Request) {
 	}
 	db := database.DB()
 	if db == nil {
-		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+		middleware.WriteJSONError(w, middleware.ErrServiceUnavailable, http.StatusServiceUnavailable)
 		return
 	}
 	shopID := ctx.ShopID
@@ -254,14 +254,14 @@ func PatchShopsMe(w http.ResponseWriter, r *http.Request) {
 		var err error
 		companyID, shopID, err = ensureRootDefaultShop(db)
 		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
 			return
 		}
 	}
 	if err := db.Model(&model.Shop{}).
 		Where("id = ? AND company_id = ?", shopID, companyID).
 		Update("name", name).Error; err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -284,7 +284,7 @@ func ShopsMeMembers(w http.ResponseWriter, r *http.Request) {
 	}
 	db := database.DB()
 	if db == nil {
-		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+		middleware.WriteJSONError(w, middleware.ErrServiceUnavailable, http.StatusServiceUnavailable)
 		return
 	}
 	shopID := ctx.ShopID
@@ -293,7 +293,7 @@ func ShopsMeMembers(w http.ResponseWriter, r *http.Request) {
 		var err error
 		companyID, shopID, err = ensureRootDefaultShop(db)
 		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
 			return
 		}
 	}
@@ -316,7 +316,7 @@ func ShopsMeMembers(w http.ResponseWriter, r *http.Request) {
 		}
 		hash, err := auth.HashPassword(body.Password)
 		if err != nil {
-			middleware.WriteJSONErrorMsg(w, err.Error(), http.StatusInternalServerError)
+			middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
 			return
 		}
 		uid := newID()
@@ -334,7 +334,7 @@ func ShopsMeMembers(w http.ResponseWriter, r *http.Request) {
 				middleware.WriteJSONError(w, "email already exists", http.StatusBadRequest)
 				return
 			}
-			middleware.WriteJSONErrorMsg(w, err.Error(), http.StatusInternalServerError)
+			middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -361,7 +361,7 @@ func ShopsMeMembers(w http.ResponseWriter, r *http.Request) {
 		if err := db.Model(&model.User{}).
 			Where("id = ? AND shop_id = ? AND company_id = ?", body.ID, shopID, companyID).
 			Update("role", body.Role).Error; err != nil {
-			middleware.WriteJSONErrorMsg(w, err.Error(), http.StatusInternalServerError)
+			middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -380,7 +380,7 @@ func ShopsMeMembers(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := db.Where("id = ? AND shop_id = ? AND company_id = ?", body.ID, shopID, companyID).
 			Delete(&model.User{}).Error; err != nil {
-			middleware.WriteJSONErrorMsg(w, err.Error(), http.StatusInternalServerError)
+			middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)

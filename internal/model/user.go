@@ -20,7 +20,7 @@ type User struct {
 	Tier           string         `gorm:"type:varchar(16);not null" json:"tier"`
 	TierStartedAt  *time.Time     `gorm:"type:timestamptz" json:"tier_started_at,omitempty"`
 	TierExpiresAt  *time.Time     `gorm:"type:timestamptz" json:"tier_expires_at,omitempty"`
-	InviteCodeUsed string         `gorm:"type:varchar(36)" json:"invite_code_used,omitempty"`
+	InviteCodeUsed string         `gorm:"type:varchar(32)" json:"invite_code_used,omitempty"`
 	InviteSlots    int            `gorm:"type:int;not null;default:0" json:"invite_slots"`
 	CreatedAt      time.Time      `json:"created_at"`
 	UpdatedAt      time.Time      `json:"updated_at"`

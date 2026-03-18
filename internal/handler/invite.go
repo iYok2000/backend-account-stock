@@ -32,29 +32,52 @@ func ValidateInviteCode(w http.ResponseWriter, r *http.Request) {
 	db := database.DB()
 	var invite model.InviteCode
 	if err := db.Where("code = ? AND deleted_at IS NULL", req.Code).First(&invite).Error; err != nil {
-		middleware.WriteJSONError(w, "invalid or expired code", http.StatusNotFound)
+		// Return 200 with valid=false for invalid codes (per spec)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"valid":   false,
+			"message": "invalid or expired code",
+		})
 		return
 	}
 
-	// Check validity
+	// Check validity - return 200 with valid=false for all invalid states (per spec)
 	if !invite.IsActive {
-		middleware.WriteJSONError(w, "code is deactivated", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"valid":   false,
+			"message": "code is deactivated",
+		})
 		return
 	}
 	if invite.ExpiresAt != nil && invite.ExpiresAt.Before(time.Now()) {
-		middleware.WriteJSONError(w, "code has expired", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"valid":   false,
+			"message": "code has expired",
+		})
 		return
 	}
 	if invite.UsedCount >= invite.MaxUses {
-		middleware.WriteJSONError(w, "code has reached max uses", http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"valid":   false,
+			"message": "code has reached max uses",
+		})
 		return
 	}
 
+	// Return all required fields per spec
+	remainingUses := invite.MaxUses - invite.UsedCount
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"valid":      true,
-		"grant_tier": invite.GrantTier,
-		"message":    "Code is valid",
+		"valid":             true,
+		"code":              invite.Code,
+		"grant_tier":        invite.GrantTier,
+		"tier_duration_days": invite.TierDurationDays,
+		"remaining_uses":    remainingUses,
+		"expires_at":        invite.ExpiresAt,
+		"message":           "Code is valid",
 	})
 }
 
@@ -133,6 +156,13 @@ func UseInviteCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check if user already used this code - return 409 Conflict per spec
+	if user.InviteCodeUsed == req.Code {
+		tx.Rollback()
+		middleware.WriteJSONError(w, "you have already used this code", http.StatusConflict)
+		return
+	}
+
 	// Update user tier
 	oldTier := user.Tier
 	user.Tier = invite.GrantTier
@@ -178,9 +208,15 @@ func UseInviteCode(w http.ResponseWriter, r *http.Request) {
 
 	tx.Commit()
 	w.Header().Set("Content-Type", "application/json")
+	var tierExpiresAt string
+	if user.TierExpiresAt != nil {
+		tierExpiresAt = user.TierExpiresAt.Format("2006-01-02T15:04:05Z07:00")
+	}
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"message": "Tier granted",
-		"tier":    user.Tier,
+		"message":         "Invite code applied successfully",
+		"new_tier":       user.Tier,
+		"tier_started_at": user.TierStartedAt.Format("2006-01-02T15:04:05Z07:00"),
+		"tier_expires_at": tierExpiresAt,
 	})
 }
 
@@ -205,7 +241,7 @@ func ListInviteCodes(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"codes": codes})
+	json.NewEncoder(w).Encode(map[string]interface{}{"invites": codes})
 }
 
 // POST /api/admin/invites — Create invite code (Root/SuperAdmin only)

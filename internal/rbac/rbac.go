@@ -99,6 +99,7 @@ var rolePermissions = map[auth.Role][]string{
 		PermPromotionsRead, PermPromotionsCreate, PermPromotionsUpdate, PermPromotionsDelete, PermPromotionsExport,
 		PermAnalysisRead, PermAnalysisExport,
 		PermAgentsRead, PermAgentsCreate, PermAgentsUpdate, PermAgentsDelete,
+		PermAnalyticsRead,
 		PermSettingsRead, PermSettingsUpdate,
 	},
 	auth.RoleSuperAdmin: {
@@ -110,6 +111,7 @@ var rolePermissions = map[auth.Role][]string{
 		PermPromotionsRead, PermPromotionsCreate, PermPromotionsUpdate, PermPromotionsDelete, PermPromotionsExport,
 		PermAnalysisRead, PermAnalysisExport,
 		PermAgentsRead, PermAgentsCreate, PermAgentsUpdate, PermAgentsDelete,
+		PermAnalyticsRead,
 		PermSettingsRead, PermSettingsUpdate,
 		PermUsersRead, PermUsersCreate, PermUsersUpdate, PermUsersDelete, PermUsersExport,
 		PermInvitesRead, PermInvitesCreate, PermInvitesUpdate, PermInvitesDelete,

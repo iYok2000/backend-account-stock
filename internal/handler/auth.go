@@ -111,15 +111,24 @@ func Login(w http.ResponseWriter, r *http.Request, jwtCfg auth.JWTConfig) {
 	rootPassword := os.Getenv("ROOT_PASSWORD")
 	rootConfirm := strings.TrimSpace(os.Getenv("ROOT_CONFIRM_CODE"))
 
-	// Dev fallback - use default values if not set
-	if rootEmail == "" {
-		rootEmail = "superadmin"
-	}
-	if rootPassword == "" {
-		rootPassword = "pass@1congrate"
-	}
-	if rootConfirm == "" {
-		rootConfirm = "YIM2021"
+	// SECURITY: In production, require env vars to be set - do not use dev defaults
+	appEnv := strings.ToLower(os.Getenv("APP_ENV"))
+	if appEnv == "production" {
+		if rootEmail == "" || rootPassword == "" || rootConfirm == "" {
+			middleware.WriteJSONError(w, middleware.ErrUnauthorized, http.StatusUnauthorized)
+			return
+		}
+	} else {
+		// Dev fallback - use default values only in non-production
+		if rootEmail == "" {
+			rootEmail = "superadmin"
+		}
+		if rootPassword == "" {
+			rootPassword = "pass@1congrate"
+		}
+		if rootConfirm == "" {
+			rootConfirm = "YIM2021"
+		}
 	}
 
 	if email == rootEmail && password == rootPassword {
@@ -138,7 +147,7 @@ func Login(w http.ResponseWriter, r *http.Request, jwtCfg auth.JWTConfig) {
 		claims.DisplayName = "Root"
 		token, err := auth.IssueToken(jwtCfg, claims)
 		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -148,7 +157,7 @@ func Login(w http.ResponseWriter, r *http.Request, jwtCfg auth.JWTConfig) {
 
 	db := database.DB()
 	if db == nil {
-		middleware.WriteJSONError(w, "service unavailable", http.StatusServiceUnavailable)
+		middleware.WriteJSONError(w, middleware.ErrServiceUnavailable, http.StatusServiceUnavailable)
 		return
 	}
 	var user model.User
@@ -188,7 +197,7 @@ func Login(w http.ResponseWriter, r *http.Request, jwtCfg auth.JWTConfig) {
 	claims.CompanyID = companyID
 	token, err := auth.IssueToken(jwtCfg, claims)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

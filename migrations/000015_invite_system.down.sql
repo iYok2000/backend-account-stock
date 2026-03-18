@@ -1,7 +1,8 @@
 -- Rollback invite system
 
-DROP TABLE IF EXISTS tier_history;
+-- Drop dependent tables first (tier_history depends on invite_codes)
 DROP TABLE IF EXISTS invite_codes;
+DROP TABLE IF EXISTS tier_history;
 DROP TABLE IF EXISTS system_config;
 
 -- Remove tier tracking columns from users

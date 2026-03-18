@@ -7,12 +7,13 @@ import (
 
 // Predefined error messages only — never pass user input to avoid injection (OWASP A03).
 const (
-	ErrUnauthorized     = "unauthorized"
+	ErrUnauthorized      = "unauthorized"
 	ErrForbidden        = "forbidden"
 	ErrInvalidToken     = "invalid or expired token"
 	ErrMethodNotAllowed = "method not allowed"
 	ErrInvalidJSON      = "invalid json"
-	ErrInternal         = "internal error"
+	ErrInternal        = "internal error"
+	ErrServiceUnavailable = "service unavailable"
 )
 
 type errorResponse struct {
