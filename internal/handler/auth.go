@@ -106,20 +106,28 @@ func Login(w http.ResponseWriter, r *http.Request, jwtCfg auth.JWTConfig) {
 	password := body.Password
 	confirmCode := strings.TrimSpace(body.ConfirmCode)
 
-	// appEnv := strings.ToLower(os.Getenv("APP_ENV"))
+	appEnv := strings.ToLower(os.Getenv("APP_ENV"))
 	rootEmail := strings.TrimSpace(os.Getenv("ROOT_EMAIL"))
 	rootPassword := os.Getenv("ROOT_PASSWORD")
 	rootConfirm := strings.TrimSpace(os.Getenv("ROOT_CONFIRM_CODE"))
 
-	// Dev fallback - use default values if not set
-	if rootEmail == "" {
-		rootEmail = "superadmin"
-	}
-	if rootPassword == "" {
-		rootPassword = "pass@1congrate"
-	}
-	if rootConfirm == "" {
-		rootConfirm = "YIM2021"
+	// Dev fallback — default credentials ONLY if NOT production
+	if appEnv != "production" {
+		if rootEmail == "" {
+			rootEmail = "superadmin"
+		}
+		if rootPassword == "" {
+			rootPassword = "pass@1congrate"
+		}
+		if rootConfirm == "" {
+			rootConfirm = "YIM2021"
+		}
+	} else {
+		// Production: refuse Root login if env vars not set
+		if rootEmail == "" || rootPassword == "" || rootConfirm == "" {
+			middleware.WriteJSONError(w, middleware.ErrUnauthorized, http.StatusUnauthorized)
+			return
+		}
 	}
 
 	if email == rootEmail && password == rootPassword {
@@ -138,7 +146,7 @@ func Login(w http.ResponseWriter, r *http.Request, jwtCfg auth.JWTConfig) {
 		claims.DisplayName = "Root"
 		token, err := auth.IssueToken(jwtCfg, claims)
 		if err != nil {
-			http.Error(w, "internal error", http.StatusInternalServerError)
+			middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -188,7 +196,7 @@ func Login(w http.ResponseWriter, r *http.Request, jwtCfg auth.JWTConfig) {
 	claims.CompanyID = companyID
 	token, err := auth.IssueToken(jwtCfg, claims)
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

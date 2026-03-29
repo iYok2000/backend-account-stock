@@ -33,7 +33,7 @@ func UsersList(w http.ResponseWriter, r *http.Request) {
 	}
 	db := database.DB()
 	if db == nil {
-		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+		middleware.WriteJSONError(w, "service unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	var users []model.User
@@ -42,7 +42,7 @@ func UsersList(w http.ResponseWriter, r *http.Request) {
 		q = q.Where("company_id = ?", ctx.CompanyID)
 	}
 	if err := q.Find(&users).Error; err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
 		return
 	}
 	items := make([]UserItem, 0, len(users))
