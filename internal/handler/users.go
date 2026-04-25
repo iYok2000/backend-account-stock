@@ -36,11 +36,14 @@ func UsersList(w http.ResponseWriter, r *http.Request) {
 		middleware.WriteJSONError(w, "service unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	var users []model.User
-	q := db.Model(&model.User{})
-	if ctx.CompanyID != "" {
-		q = q.Where("company_id = ?", ctx.CompanyID)
+	if ctx.CompanyID == "" {
+		// Root user has no tenant scope; return empty list for this endpoint.
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(UsersListResponse{Users: []UserItem{}})
+		return
 	}
+	var users []model.User
+	q := db.Model(&model.User{}).Where("company_id = ?", ctx.CompanyID)
 	if err := q.Find(&users).Error; err != nil {
 		middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
 		return

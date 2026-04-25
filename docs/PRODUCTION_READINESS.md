@@ -44,11 +44,17 @@ Checklist เพื่อให้ระบบ **พร้อมขึ้น pro
 ## 4. สิ่งที่ทำแล้วในโค้ด
 
 - Refuse start เมื่อ APP_ENV=production และ JWT_SECRET เป็น default
-- CORS จาก env; default localhost/127.0.0.1
+- CORS จาก env; default localhost/127.0.0.1; ไม่ส่ง Allow-Credentials:true คู่กับ origin:*
+- HTTP server timeouts: ReadHeaderTimeout=10s, ReadTimeout=30s, WriteTimeout=60s, IdleTimeout=120s
+- Global body limit middleware: 32 MB ป้องกัน DoS จาก oversized payload
 - Auth middleware ใส่ CompanyID ลง context
-- RequirePermission สำหรับ /api/users (users:read), /api/inventory/import (inventory:create), /api/inventory, /api/inventory/summary (inventory:read)
-- WriteJSONError สำหรับ error ทุกจุด (ไม่ส่ง user input)
-- TenantScope(ctx) helper พร้อมใช้เมื่อ handler ต่อ DB
+- RequirePermission สำหรับ /api/users (users:read), /api/inventory/* (inventory:create/read)
+- WriteJSONError ใช้ constant ทุกจุด ไม่ส่ง raw db errors ให้ client
+- TenantScope(ctx) helper พร้อมใช้; Root user บน /api/users returns empty list (ไม่ query ข้าม tenant)
+- Invite code lock: ใช้ `clause.Locking{Strength:"UPDATE"}` (GORM v2 SELECT FOR UPDATE) ป้องกัน race condition
+- tx.Commit() error checked ทุกจุด
+- Root credentials: ใช้ `crypto/subtle.ConstantTimeCompare` (constant-time) ป้องกัน timing attack
+- Performance indexes บน (shop_id, date), (user_id, order_date), invite_codes.code, users.email (migration 000015)
 
 ---
 

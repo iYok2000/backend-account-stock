@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -305,8 +306,11 @@ func validateImportItem(it ImportSKURequest) (importSKURow, error) {
 	if !validAmount(it.Quantity, true) {
 		return importSKURow{}, errors.New("quantity must be >= 0 and reasonable")
 	}
-	if !validAmount(it.Revenue, true) || !validAmount(it.Deductions, true) || !validAmount(it.Refund, true) || !validAmount(it.Net, true) {
-		return importSKURow{}, errors.New("amount fields must be >= 0 and reasonable")
+	if !validAmount(it.Revenue, true) || !validAmount(it.Deductions, true) || !validAmount(it.Refund, true) {
+		return importSKURow{}, errors.New("revenue, deductions, and refund must be >= 0 and reasonable")
+	}
+	if math.Abs(it.Net) > maxNumericAmount {
+		return importSKURow{}, errors.New("net amount out of range")
 	}
 
 	name := strings.TrimSpace(it.ProductName)

@@ -22,14 +22,16 @@ Backend measures to align with **OWASP Top 10 (2021)** and prevent **injection**
 
 ## A03:2021 – Injection
 
-- **Error responses:** All API error bodies use fixed messages and `encoding/json` (no string concatenation of user input). See `middleware/secure.go`: `WriteJSONError` with constants only.
+- **Error responses:** All API error bodies use fixed constants (`ErrInternal`, `ErrForbidden`, etc.) from `middleware/secure.go`. Raw `err.Error()` is never sent to the client.
 - **JWT claims:** Role/tier validated with **allowlists** (`ValidRole`, `ValidTier`). Claim lengths capped (`ValidateClaimLengths`, `MaxTokenLen`) to limit DoS and injection surface.
-- **Future:** Any SQL/NoSQL must use parameterized queries; no concatenation of user input into queries or commands. Logging must not pass unsanitized user input into log format strings.
+- **SQL:** All DB queries use GORM parameterized queries; no user input is concatenated into SQL strings.
 
 ---
 
 ## A04:2021 – Insecure Design
 
+- **Request body limit:** Global `limitBodySize` middleware caps all request bodies at **32 MB** to prevent memory DoS from oversized payloads (`cmd/server/main.go`).
+- **HTTP timeouts:** `ReadHeaderTimeout=10s`, `ReadTimeout=30s`, `WriteTimeout=60s`, `IdleTimeout=120s` to prevent Slowloris-style connection exhaustion.
 - **Claim limits:** `MaxClaimSubjectLen`, `MaxClaimCompanyIDLen`, `MaxClaimDisplayNameLen` (256), `MaxTokenLen` (8KB) to prevent oversized payloads.
 - **Auth flow:** JWT required for protected routes; no optional auth that could bypass checks.
 
@@ -38,6 +40,7 @@ Backend measures to align with **OWASP Top 10 (2021)** and prevent **injection**
 ## A05:2021 – Security Misconfiguration
 
 - **Default JWT secret:** Only for local dev; production must set `JWT_SECRET` (and optionally `JWT_ISSUER`, `JWT_AUDIENCE`).
+- **CORS:** `Access-Control-Allow-Credentials: true` is only set when a specific origin matches — never sent alongside `Access-Control-Allow-Origin: *`.
 - **Headers:** `Content-Type: application/json` where applicable; no sensitive data in error details.
 
 ---
@@ -50,7 +53,8 @@ Backend measures to align with **OWASP Top 10 (2021)** and prevent **injection**
 
 ## A07:2021 – Identification and Authentication Failures
 
-- **JWT:** Required for `/api/auth/me` and `/api/users`; invalid/expired token → 401. No detailed error to client (generic “invalid or expired token”).
+- **JWT:** Required for `/api/auth/me` and all protected endpoints; invalid/expired token → 401. No detailed error to client (generic "invalid or expired token").
+- **Root credential comparison:** Uses `crypto/subtle.ConstantTimeCompare` for email, password, and confirm code to prevent timing-based credential enumeration.
 - **Role/tier:** Only allowlisted values accepted; otherwise 401.
 
 ---

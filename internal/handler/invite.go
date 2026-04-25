@@ -12,6 +12,7 @@ import (
 	"account-stock-be/internal/model"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm/clause"
 )
 
 // POST /api/invite/validate — Validate invite code (public, before registration)
@@ -71,13 +72,13 @@ func ValidateInviteCode(w http.ResponseWriter, r *http.Request) {
 	remainingUses := invite.MaxUses - invite.UsedCount
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"valid":             true,
-		"code":              invite.Code,
-		"grant_tier":        invite.GrantTier,
+		"valid":              true,
+		"code":               invite.Code,
+		"grant_tier":         invite.GrantTier,
 		"tier_duration_days": invite.TierDurationDays,
-		"remaining_uses":    remainingUses,
-		"expires_at":        invite.ExpiresAt,
-		"message":           "Code is valid",
+		"remaining_uses":     remainingUses,
+		"expires_at":         invite.ExpiresAt,
+		"message":            "Code is valid",
 	})
 }
 
@@ -130,7 +131,7 @@ func UseInviteCode(w http.ResponseWriter, r *http.Request) {
 
 	// Lock invite code
 	var invite model.InviteCode
-	if err := tx.Set("gorm:query_option", "FOR UPDATE").Where("code = ? AND deleted_at IS NULL", req.Code).First(&invite).Error; err != nil {
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("code = ? AND deleted_at IS NULL", req.Code).First(&invite).Error; err != nil {
 		tx.Rollback()
 		middleware.WriteJSONError(w, "invalid or expired code", http.StatusNotFound)
 		return
@@ -206,7 +207,10 @@ func UseInviteCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tx.Commit()
+	if err := tx.Commit().Error; err != nil {
+		middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	var tierExpiresAt string
 	if user.TierExpiresAt != nil {
@@ -214,7 +218,7 @@ func UseInviteCode(w http.ResponseWriter, r *http.Request) {
 	}
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"message":         "Invite code applied successfully",
-		"new_tier":       user.Tier,
+		"new_tier":        user.Tier,
 		"tier_started_at": user.TierStartedAt.Format("2006-01-02T15:04:05Z07:00"),
 		"tier_expires_at": tierExpiresAt,
 	})

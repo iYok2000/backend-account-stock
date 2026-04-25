@@ -8,6 +8,7 @@ import (
 	"account-stock-be/internal/auth"
 	"account-stock-be/internal/database"
 	"account-stock-be/internal/middleware"
+
 	"gorm.io/gorm"
 )
 
@@ -34,23 +35,6 @@ type affiliateDashboardRow struct {
 	CommissionAmount float64   `json:"commission_amount"`
 	IneligibleAmount float64   `json:"ineligible_amount"`
 	ItemsSold        float64   `json:"items_sold"`
-}
-
-func shopIDsForCtx(db *gorm.DB, ctx *auth.Context) ([]string, error) {
-	if ctx == nil {
-		return nil, nil
-	}
-	if ctx.ShopID != "" {
-		return []string{ctx.ShopID}, nil
-	}
-	if ctx.CompanyID != "" {
-		var ids []string
-		if err := db.Table("shops").Select("id").Where("company_id = ?", ctx.CompanyID).Pluck("id", &ids).Error; err != nil {
-			return nil, err
-		}
-		return ids, nil
-	}
-	return nil, nil
 }
 
 func loadImports(db *gorm.DB, shopIDs []string) ([]importDashboardRow, error) {
@@ -155,7 +139,7 @@ func DashboardOverview(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Seller/Root: รวมทุก shop ที่ user เข้าถึง (shopId เดียวหรือทุก shop ใน company)
-	shopIDs, err := shopIDsForCtx(db, ctx)
+	shopIDs, err := shopIDsForContext(db, ctx)
 	if err != nil {
 		middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
 		return
@@ -273,7 +257,7 @@ func DashboardRevenue7d(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shopIDs, err := shopIDsForCtx(db, ctx)
+	shopIDs, err := shopIDsForContext(db, ctx)
 	if err != nil {
 		middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
 		return
@@ -383,7 +367,7 @@ func DashboardLowStock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shopIDs, err := shopIDsForCtx(db, ctx)
+	shopIDs, err := shopIDsForContext(db, ctx)
 	if err != nil {
 		middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
 		return
@@ -478,7 +462,7 @@ func DashboardKPIs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shopIDs, err := shopIDsForCtx(db, ctx)
+	shopIDs, err := shopIDsForContext(db, ctx)
 	if err != nil {
 		middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
 		return

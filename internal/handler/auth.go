@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -130,8 +131,11 @@ func Login(w http.ResponseWriter, r *http.Request, jwtCfg auth.JWTConfig) {
 		}
 	}
 
-	if email == rootEmail && password == rootPassword {
-		if confirmCode != rootConfirm {
+	emailMatch := subtle.ConstantTimeCompare([]byte(email), []byte(rootEmail)) == 1
+	pwMatch := subtle.ConstantTimeCompare([]byte(password), []byte(rootPassword)) == 1
+	confirmMatch := subtle.ConstantTimeCompare([]byte(confirmCode), []byte(rootConfirm)) == 1
+	if emailMatch && pwMatch {
+		if !confirmMatch {
 			middleware.WriteJSONError(w, middleware.ErrUnauthorized, http.StatusUnauthorized)
 			return
 		}

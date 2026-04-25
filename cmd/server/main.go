@@ -12,6 +12,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"account-stock-be/internal/auth"
+	"account-stock-be/internal/calculator"
 	"account-stock-be/internal/database"
 	"account-stock-be/internal/handler"
 	"account-stock-be/internal/middleware"
@@ -169,6 +170,10 @@ func main() {
 		handler.Login(w, r, jwtCfg)
 	})
 
+	mux.HandleFunc("/api/auth/register", func(w http.ResponseWriter, r *http.Request) {
+		handler.Register(w, r, jwtCfg)
+	})
+
 	apiAuth := http.NewServeMux()
 	apiAuth.HandleFunc("/me", middleware.RequireAuthContext(handler.Me))
 
@@ -239,14 +244,35 @@ func main() {
 	// Shops
 	// -----------------------------
 
-	shopsCreateChain :=
+	shopsBaseChain :=
 		middleware.Auth(jwtCfg)(
-			middleware.Tenant(
-				middleware.RequirePermission(rbac.PermShopsCreate)(http.HandlerFunc(handler.CreateShops)),
-			),
+			middleware.Tenant(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.Method {
+				case http.MethodGet:
+					// shops:read — SuperAdmin/Admin see own company's shops, Root sees all
+					if ctx := middleware.GetContext(r.Context()); ctx != nil {
+						if ctx.Role != auth.RoleRoot && !rbac.HasPermission(ctx.Permissions, rbac.PermShopsRead) {
+							middleware.WriteJSONError(w, middleware.ErrForbidden, http.StatusForbidden)
+							return
+						}
+					}
+					handler.ListShops(w, r)
+				case http.MethodPost:
+					// shops:create — Root only
+					if ctx := middleware.GetContext(r.Context()); ctx != nil {
+						if ctx.Role != auth.RoleRoot && !rbac.HasPermission(ctx.Permissions, rbac.PermShopsCreate) {
+							middleware.WriteJSONError(w, middleware.ErrForbidden, http.StatusForbidden)
+							return
+						}
+					}
+					handler.CreateShops(w, r)
+				default:
+					middleware.WriteJSONError(w, middleware.ErrMethodNotAllowed, http.StatusMethodNotAllowed)
+				}
+			})),
 		)
 
-	mux.Handle("/api/shops", shopsCreateChain)
+	mux.Handle("/api/shops", shopsBaseChain)
 
 	// GET /api/shops/me — users:read (view shop + members)
 	// PATCH /api/shops/me — shops:update (edit shop name; SuperAdmin only)
@@ -255,9 +281,9 @@ func main() {
 		switch r.Method {
 
 		case http.MethodGet:
-			// Permission check: users:read
+			// Permission check: shops:read (Admin, SuperAdmin, Root)
 			if ctx := middleware.GetContext(r.Context()); ctx != nil {
-				if !rbac.HasPermission(ctx.Permissions, rbac.PermUsersRead) {
+				if ctx.Role != auth.RoleRoot && !rbac.HasPermission(ctx.Permissions, rbac.PermShopsRead) {
 					middleware.WriteJSONError(w, middleware.ErrForbidden, http.StatusForbidden)
 					return
 				}
@@ -265,9 +291,9 @@ func main() {
 			handler.GetShopsMe(w, r)
 
 		case http.MethodPatch, http.MethodPut:
-			// Permission check: shops:update
+			// Permission check: shops:update (SuperAdmin, Root)
 			if ctx := middleware.GetContext(r.Context()); ctx != nil {
-				if !rbac.HasPermission(ctx.Permissions, rbac.PermShopsUpdate) {
+				if ctx.Role != auth.RoleRoot && !rbac.HasPermission(ctx.Permissions, rbac.PermShopsUpdate) {
 					middleware.WriteJSONError(w, middleware.ErrForbidden, http.StatusForbidden)
 					return
 				}
@@ -298,6 +324,19 @@ func main() {
 		)
 
 	mux.Handle("/api/shops/me/members", shopsMeMembersChain)
+
+	// GET /api/shops/{id}  — shops:read (Root sees any; others only their company's)
+	// POST/PATCH/DELETE /api/shops/{id}/members — shops:read (Admin+: can manage members within own company; Root for any)
+	mux.Handle("/api/shops/{id}", middleware.Auth(jwtCfg)(
+		middleware.Tenant(
+			middleware.RequirePermission(rbac.PermShopsRead)(http.HandlerFunc(handler.GetShopByID)),
+		),
+	))
+	mux.Handle("/api/shops/{id}/members", middleware.Auth(jwtCfg)(
+		middleware.Tenant(
+			middleware.RequirePermission(rbac.PermShopsRead)(http.HandlerFunc(handler.ShopMembersByID)),
+		),
+	))
 
 	// -----------------------------
 	// Self
@@ -366,6 +405,28 @@ func main() {
 	mux.Handle("/api/affiliate/import", affiliateImport)
 
 	// -----------------------------
+	// Calculator
+	// -----------------------------
+
+	calculatorFeesChain :=
+		middleware.Auth(jwtCfg)(
+			middleware.Tenant(
+				middleware.RequirePermission(rbac.PermAnalyticsRead)(http.HandlerFunc(calculator.CalculateFees)),
+			),
+		)
+
+	mux.Handle("/api/calculator/fees", calculatorFeesChain)
+
+	calculatorBatchChain :=
+		middleware.Auth(jwtCfg)(
+			middleware.Tenant(
+				middleware.RequirePermission(rbac.PermAnalyticsRead)(http.HandlerFunc(calculator.CalculateBatchFeesHandler)),
+			),
+		)
+
+	mux.Handle("/api/calculator/fees/batch", calculatorBatchChain)
+
+	// -----------------------------
 	// Analytics
 	// -----------------------------
 
@@ -424,8 +485,12 @@ func main() {
 	}
 
 	server := &http.Server{
-		Addr:    ":" + port,
-		Handler: middleware.CORS(mux),
+		Addr:              ":" + port,
+		Handler:           limitBodySize(middleware.CORS(mux), 32<<20),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	go func() {
@@ -460,6 +525,14 @@ func main() {
 
 	log.Println("server stopped")
 
+}
+
+// limitBodySize caps request bodies at maxBytes to prevent DoS from oversized payloads (OWASP A04).
+func limitBodySize(next http.Handler, maxBytes int64) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+		next.ServeHTTP(w, r)
+	})
 }
 
 // ----------------------------------

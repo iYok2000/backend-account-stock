@@ -213,7 +213,7 @@ func AffiliateImport(w http.ResponseWriter, r *http.Request) {
 			middleware.WriteJSONErrorMsg(w, "ข้อมูลวันที่ไม่ครบหรือรูปแบบไม่ถูกต้อง (ต้องเป็น YYYY-MM-DD)", http.StatusBadRequest)
 			return
 		}
-		middleware.WriteJSONErrorMsg(w, errMsg, http.StatusInternalServerError)
+		middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
 		return
 	}
 

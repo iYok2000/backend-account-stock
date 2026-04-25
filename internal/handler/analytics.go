@@ -9,6 +9,7 @@ import (
 	"account-stock-be/internal/auth"
 	"account-stock-be/internal/database"
 	"account-stock-be/internal/middleware"
+
 	"gorm.io/gorm"
 )
 
@@ -111,6 +112,9 @@ func fetchAffiliateRows(db *gorm.DB, companyID, userID string, from, to time.Tim
 	return rows, nil
 }
 
+// maxDateRangeDays caps the maximum query range to prevent DoS via large date ranges.
+const maxDateRangeDays = 365
+
 func parseDateRange(r *http.Request) (time.Time, time.Time) {
 	end := time.Now().In(tzBangkok).Truncate(24 * time.Hour)
 	start := end.AddDate(0, 0, -29)
@@ -126,6 +130,10 @@ func parseDateRange(r *http.Request) (time.Time, time.Time) {
 	}
 	if end.Before(start) {
 		start, end = end, start
+	}
+	// Cap range to prevent excessive DB scans.
+	if end.Sub(start).Hours()/24 > float64(maxDateRangeDays) {
+		start = end.AddDate(0, 0, -maxDateRangeDays)
 	}
 	return start, end
 }
@@ -446,14 +454,14 @@ func writeTrendsResponse(w http.ResponseWriter, buckets, monthlyBuckets []trendB
 	}
 	hasData := len(bucketList) > 0 || len(monthList) > 0 || len(momGrowth) > 0 || len(yoy) > 0
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"buckets":         bucketList,
-		"monthlyBuckets":  monthList,
-		"momGrowth":       momGrowth,
-		"yoy":             yoy,
-		"hasData":         hasData,
-		"from":            from.Format("2006-01-02"),
-		"to":              to.Format("2006-01-02"),
-		"period":          period,
+		"buckets":        bucketList,
+		"monthlyBuckets": monthList,
+		"momGrowth":      momGrowth,
+		"yoy":            yoy,
+		"hasData":        hasData,
+		"from":           from.Format("2006-01-02"),
+		"to":             to.Format("2006-01-02"),
+		"period":         period,
 	})
 }
 
@@ -548,37 +556,101 @@ func sortedMapKeys(m map[string][]float64) []string {
 	return keys
 }
 
-// ─── GET /api/analytics/reconciliation ───────────────────────────────────────
+// ─── Unified data fetcher: eliminates affiliate/seller branching in each handler ─
 
-func AnalyticsReconciliation(w http.ResponseWriter, r *http.Request) {
+// analyticsData holds normalized data fetched for either affiliate or seller.
+type analyticsData struct {
+	rows     []importRow // normalized to importRow shape
+	dayMap   map[string]*dailyMetric
+	skuMap   map[string]*skuMetric
+	affRows  []affiliateAnalyticsRow // original affiliate rows (for reconciliation)
+	isAff    bool
+	from, to time.Time
+}
+
+// fetchAnalyticsData handles the common boilerplate: method check, auth, db,
+// date range, affiliate vs seller branching. Returns nil on error (already written to w).
+func fetchAnalyticsData(w http.ResponseWriter, r *http.Request) *analyticsData {
 	if r.Method != http.MethodGet {
 		middleware.WriteJSONError(w, middleware.ErrMethodNotAllowed, http.StatusMethodNotAllowed)
-		return
+		return nil
 	}
 	ctx := middleware.GetContext(r.Context())
 	if ctx == nil {
 		middleware.WriteJSONError(w, middleware.ErrUnauthorized, http.StatusUnauthorized)
-		return
+		return nil
 	}
 	db := database.DB()
 	if db == nil {
 		middleware.WriteJSONErrorMsg(w, "database not initialized", http.StatusInternalServerError)
-		return
+		return nil
 	}
 	from, to := parseDateRange(r)
 
-	// Affiliate branch
 	if ctx.Role == auth.RoleAffiliate {
 		if ctx.CompanyID == "" || ctx.UserID == "" {
 			middleware.WriteJSONError(w, middleware.ErrUnauthorized, http.StatusUnauthorized)
-			return
+			return nil
 		}
-		rows, err := fetchAffiliateRows(db, ctx.CompanyID, ctx.UserID, from, to)
+		affRows, err := fetchAffiliateRows(db, ctx.CompanyID, ctx.UserID, from, to)
 		if err != nil {
 			middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
-			return
+			return nil
 		}
-		a := aggregateAffiliate(rows)
+		rows := affiliateToImportRows(affRows)
+		return &analyticsData{
+			rows:    rows,
+			dayMap:  affiliateToDailyMap(affRows),
+			skuMap:  affiliateToSkuMap(affRows),
+			affRows: affRows,
+			isAff:   true,
+			from:    from, to: to,
+		}
+	}
+
+	shopIDs, err := shopIDsForContext(db, ctx)
+	if err != nil {
+		middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
+		return nil
+	}
+	rows, err := fetchImportRows(db, shopIDs, from, to)
+	if err != nil {
+		middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
+		return nil
+	}
+	return &analyticsData{
+		rows:   rows,
+		dayMap: importToDailyMap(rows),
+		skuMap: importToSkuMap(rows),
+		isAff:  false,
+		from:   from, to: to,
+	}
+}
+
+// affiliateToImportRows converts affiliate rows to importRow shape for unified processing.
+func affiliateToImportRows(rows []affiliateAnalyticsRow) []importRow {
+	out := make([]importRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, importRow{
+			Date:     r.OrderDate,
+			Revenue:  r.GMV,
+			Net:      r.CommissionAmount - r.IneligibleAmount,
+			Quantity: r.ItemsSold,
+		})
+	}
+	return out
+}
+
+// ─── GET /api/analytics/reconciliation ───────────────────────────────────────
+
+func AnalyticsReconciliation(w http.ResponseWriter, r *http.Request) {
+	d := fetchAnalyticsData(w, r)
+	if d == nil {
+		return
+	}
+
+	if d.isAff {
+		a := aggregateAffiliate(d.affRows)
 		totalFees := a.Ineligible
 		net := a.Earned - totalFees
 		settlementRate := 0.0
@@ -586,30 +658,16 @@ func AnalyticsReconciliation(w http.ResponseWriter, r *http.Request) {
 			settlementRate = (a.Earned / a.GMV) * 100
 		}
 		writeJSON(w, http.StatusOK, map[string]interface{}{
-			"gmv":            a.GMV,
-			"settlement":     a.Earned,
-			"totalFees":      totalFees,
-			"netProfit":      net,
+			"gmv": a.GMV, "settlement": a.Earned,
+			"totalFees": totalFees, "netProfit": net,
 			"settlementRate": settlementRate,
 			"feeBreakdown":   []map[string]interface{}{{"label": "ineligible", "value": totalFees}},
-			"from":           from.Format("2006-01-02"),
-			"to":             to.Format("2006-01-02"),
+			"from":           d.from.Format("2006-01-02"), "to": d.to.Format("2006-01-02"),
 		})
 		return
 	}
 
-	// Owner / Admin / Root branch — shopIDsForContext handles all scoping
-	shopIDs, err := shopIDsForContext(db, ctx)
-	if err != nil {
-		middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
-		return
-	}
-	rows, err := fetchImportRows(db, shopIDs, from, to)
-	if err != nil {
-		middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
-		return
-	}
-	a := aggregateImport(rows)
+	a := aggregateImport(d.rows)
 	totalFees := a.GMV - a.Settlement
 	if totalFees < 0 {
 		totalFees = 0
@@ -618,248 +676,74 @@ func AnalyticsReconciliation(w http.ResponseWriter, r *http.Request) {
 	if a.GMV > 0 {
 		settlementRate = (a.Settlement / a.GMV) * 100
 	}
-	// tiktokCommission = implied platform cut (GMV - settlement - deductions - refund)
 	tiktokFee := totalFees - a.Deductions - a.Refund
 	if tiktokFee < 0 {
 		tiktokFee = 0
 	}
-
 	feeBreakdown := []map[string]interface{}{
 		{"label": "tiktokCommission", "value": tiktokFee},
 		{"label": "deductions", "value": a.Deductions},
 		{"label": "refund", "value": a.Refund},
 	}
-	// filter out zero-value items to keep the chart clean
-	filteredBreakdown := make([]map[string]interface{}, 0, len(feeBreakdown))
+	filtered := make([]map[string]interface{}, 0, len(feeBreakdown))
 	for _, item := range feeBreakdown {
 		if v, ok := item["value"].(float64); ok && v > 0 {
-			filteredBreakdown = append(filteredBreakdown, item)
+			filtered = append(filtered, item)
 		}
 	}
-
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"gmv":            a.GMV,
-		"settlement":     a.Settlement,
-		"totalFees":      totalFees,
-		"netProfit":      a.Settlement,
+		"gmv": a.GMV, "settlement": a.Settlement,
+		"totalFees": totalFees, "netProfit": a.Settlement,
 		"settlementRate": settlementRate,
-		"feeBreakdown":   filteredBreakdown,
-		"from":           from.Format("2006-01-02"),
-		"to":             to.Format("2006-01-02"),
+		"feeBreakdown":   filtered,
+		"from":           d.from.Format("2006-01-02"), "to": d.to.Format("2006-01-02"),
 	})
 }
 
 // ─── GET /api/analytics/daily-metrics ────────────────────────────────────────
 
 func AnalyticsDailyMetrics(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		middleware.WriteJSONError(w, middleware.ErrMethodNotAllowed, http.StatusMethodNotAllowed)
+	d := fetchAnalyticsData(w, r)
+	if d == nil {
 		return
 	}
-	ctx := middleware.GetContext(r.Context())
-	if ctx == nil {
-		middleware.WriteJSONError(w, middleware.ErrUnauthorized, http.StatusUnauthorized)
-		return
-	}
-	db := database.DB()
-	if db == nil {
-		middleware.WriteJSONErrorMsg(w, "database not initialized", http.StatusInternalServerError)
-		return
-	}
-	from, to := parseDateRange(r)
-
-	if ctx.Role == auth.RoleAffiliate {
-		if ctx.CompanyID == "" || ctx.UserID == "" {
-			middleware.WriteJSONError(w, middleware.ErrUnauthorized, http.StatusUnauthorized)
-			return
-		}
-		rows, err := fetchAffiliateRows(db, ctx.CompanyID, ctx.UserID, from, to)
-		if err != nil {
-			middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
-			return
-		}
-		writeDailyMetrics(w, affiliateToDailyMap(rows), from, to)
-		return
-	}
-
-	shopIDs, err := shopIDsForContext(db, ctx)
-	if err != nil {
-		middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
-		return
-	}
-	rows, err := fetchImportRows(db, shopIDs, from, to)
-	if err != nil {
-		middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
-		return
-	}
-	writeDailyMetrics(w, importToDailyMap(rows), from, to)
+	writeDailyMetrics(w, d.dayMap, d.from, d.to)
 }
 
 // ─── GET /api/analytics/product-metrics ──────────────────────────────────────
 
 func AnalyticsProductMetrics(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		middleware.WriteJSONError(w, middleware.ErrMethodNotAllowed, http.StatusMethodNotAllowed)
+	d := fetchAnalyticsData(w, r)
+	if d == nil {
 		return
 	}
-	ctx := middleware.GetContext(r.Context())
-	if ctx == nil {
-		middleware.WriteJSONError(w, middleware.ErrUnauthorized, http.StatusUnauthorized)
-		return
-	}
-	db := database.DB()
-	if db == nil {
-		middleware.WriteJSONErrorMsg(w, "database not initialized", http.StatusInternalServerError)
-		return
-	}
-	from, to := parseDateRange(r)
-
-	if ctx.Role == auth.RoleAffiliate {
-		if ctx.CompanyID == "" || ctx.UserID == "" {
-			middleware.WriteJSONError(w, middleware.ErrUnauthorized, http.StatusUnauthorized)
-			return
-		}
-		rows, err := fetchAffiliateRows(db, ctx.CompanyID, ctx.UserID, from, to)
-		if err != nil {
-			middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
-			return
-		}
-		writeProductMetrics(w, affiliateToSkuMap(rows), from, to)
-		return
-	}
-
-	shopIDs, err := shopIDsForContext(db, ctx)
-	if err != nil {
-		middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
-		return
-	}
-	rows, err := fetchImportRows(db, shopIDs, from, to)
-	if err != nil {
-		middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
-		return
-	}
-	writeProductMetrics(w, importToSkuMap(rows), from, to)
+	writeProductMetrics(w, d.skuMap, d.from, d.to)
 }
 
 // ─── GET /api/analytics/trends ────────────────────────────────────────────────
 
 func AnalyticsTrends(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		middleware.WriteJSONError(w, middleware.ErrMethodNotAllowed, http.StatusMethodNotAllowed)
+	d := fetchAnalyticsData(w, r)
+	if d == nil {
 		return
 	}
-	ctx := middleware.GetContext(r.Context())
-	if ctx == nil {
-		middleware.WriteJSONError(w, middleware.ErrUnauthorized, http.StatusUnauthorized)
-		return
-	}
-	db := database.DB()
-	if db == nil {
-		middleware.WriteJSONErrorMsg(w, "database not initialized", http.StatusInternalServerError)
-		return
-	}
-	from, to := parseDateRange(r)
 	period := parsePeriod(r)
-
-	if ctx.Role == auth.RoleAffiliate {
-		if ctx.CompanyID == "" || ctx.UserID == "" {
-			middleware.WriteJSONError(w, middleware.ErrUnauthorized, http.StatusUnauthorized)
-			return
-		}
-		rows, err := fetchAffiliateRows(db, ctx.CompanyID, ctx.UserID, from, to)
-		if err != nil {
-			middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
-			return
-		}
-		importRows := affiliateToImportRows(rows)
-		buckets := rowsToTrendBuckets(importRows, period)
-		monthly := rowsToMonthlyBuckets(importRows)
-		mom := trendBucketsToMomGrowth(monthly)
-		yoy := trendBucketsToYoy(importRows)
-		writeTrendsResponse(w, buckets, monthly, mom, yoy, from, to, period)
-		return
-	}
-
-	shopIDs, err := shopIDsForContext(db, ctx)
-	if err != nil {
-		middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
-		return
-	}
-	rows, err := fetchImportRows(db, shopIDs, from, to)
-	if err != nil {
-		middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
-		return
-	}
-	buckets := rowsToTrendBuckets(rows, period)
-	monthly := rowsToMonthlyBuckets(rows)
+	buckets := rowsToTrendBuckets(d.rows, period)
+	monthly := rowsToMonthlyBuckets(d.rows)
 	mom := trendBucketsToMomGrowth(monthly)
-	yoy := trendBucketsToYoy(rows)
-	writeTrendsResponse(w, buckets, monthly, mom, yoy, from, to, period)
-}
-
-// affiliateToImportRows converts affiliate rows to importRow shape for trend bucketing.
-func affiliateToImportRows(rows []affiliateAnalyticsRow) []importRow {
-	out := make([]importRow, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, importRow{
-			Date:    r.OrderDate,
-			Revenue: r.GMV,
-			Net:     r.CommissionAmount - r.IneligibleAmount,
-			Quantity: r.ItemsSold,
-		})
-	}
-	return out
+	yoy := trendBucketsToYoy(d.rows)
+	writeTrendsResponse(w, buckets, monthly, mom, yoy, d.from, d.to, period)
 }
 
 // ─── GET /api/analytics/profitability ─────────────────────────────────────────
 
 func AnalyticsProfitability(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		middleware.WriteJSONError(w, middleware.ErrMethodNotAllowed, http.StatusMethodNotAllowed)
+	d := fetchAnalyticsData(w, r)
+	if d == nil {
 		return
 	}
-	ctx := middleware.GetContext(r.Context())
-	if ctx == nil {
-		middleware.WriteJSONError(w, middleware.ErrUnauthorized, http.StatusUnauthorized)
-		return
-	}
-	db := database.DB()
-	if db == nil {
-		middleware.WriteJSONErrorMsg(w, "database not initialized", http.StatusInternalServerError)
-		return
-	}
-	from, to := parseDateRange(r)
-
-	if ctx.Role == auth.RoleAffiliate {
-		if ctx.CompanyID == "" || ctx.UserID == "" {
-			middleware.WriteJSONError(w, middleware.ErrUnauthorized, http.StatusUnauthorized)
-			return
-		}
-		rows, err := fetchAffiliateRows(db, ctx.CompanyID, ctx.UserID, from, to)
-		if err != nil {
-			middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
-			return
-		}
-		skuMap := affiliateToSkuMap(rows)
-		importRows := affiliateToImportRows(rows)
-		avgMargin, marginBuckets, byCategory, marginTrend := skuMapToProfitability(skuMap, importRows, from, to)
-		writeProfitabilityResponse(w, avgMargin, marginBuckets, byCategory, marginTrend, from, to)
-		return
-	}
-
-	shopIDs, err := shopIDsForContext(db, ctx)
-	if err != nil {
-		middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
-		return
-	}
-	rows, err := fetchImportRows(db, shopIDs, from, to)
-	if err != nil {
-		middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
-		return
-	}
-	skuMap := importToSkuMap(rows)
-	avgMargin, marginBuckets, byCategory, marginTrend := skuMapToProfitability(skuMap, rows, from, to)
-	writeProfitabilityResponse(w, avgMargin, marginBuckets, byCategory, marginTrend, from, to)
+	avgMargin, marginBuckets, byCategory, marginTrend := skuMapToProfitability(d.skuMap, d.rows, d.from, d.to)
+	writeProfitabilityResponse(w, avgMargin, marginBuckets, byCategory, marginTrend, d.from, d.to)
 }
 
 func writeProfitabilityResponse(w http.ResponseWriter, avgMargin float64, marginBuckets []map[string]interface{}, byCategory []map[string]interface{}, marginTrend []map[string]interface{}, from, to time.Time) {

@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go build:*)",
+      "Bash(go version:*)",
+      "Bash(/usr/local/go/bin/go version:*)",
+      "Bash(go vet:*)",
+      "Read(//Users/noppachai/Documents/project-tiktok/account-fe/**)",
+      "Bash(npx tsc:*)",
+      "Bash(echo \"FE_TSC=$?\")",
+      "Bash(cd /Users/noppachai/Documents/project-tiktok/account-fe && npm run lint 2>&1 | tail -30; echo \"FE_LINT=$?\")"
+    ]
+  }
+}

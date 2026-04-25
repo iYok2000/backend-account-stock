@@ -1,24 +1,22 @@
 package handler
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"strings"
+	"time"
 
 	"account-stock-be/internal/auth"
 	"account-stock-be/internal/database"
 	"account-stock-be/internal/middleware"
 	"account-stock-be/internal/model"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
 func newID() string {
-	b := make([]byte, 16)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
+	return uuid.New().String()
 }
 
 // CreateShopsRequest body for POST /api/shops (Root only).
@@ -316,7 +314,7 @@ func ShopsMeMembers(w http.ResponseWriter, r *http.Request) {
 		}
 		hash, err := auth.HashPassword(body.Password)
 		if err != nil {
-			middleware.WriteJSONErrorMsg(w, err.Error(), http.StatusInternalServerError)
+			middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
 			return
 		}
 		uid := newID()
@@ -334,7 +332,7 @@ func ShopsMeMembers(w http.ResponseWriter, r *http.Request) {
 				middleware.WriteJSONError(w, "email already exists", http.StatusBadRequest)
 				return
 			}
-			middleware.WriteJSONErrorMsg(w, err.Error(), http.StatusInternalServerError)
+			middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -361,7 +359,7 @@ func ShopsMeMembers(w http.ResponseWriter, r *http.Request) {
 		if err := db.Model(&model.User{}).
 			Where("id = ? AND shop_id = ? AND company_id = ?", body.ID, shopID, companyID).
 			Update("role", body.Role).Error; err != nil {
-			middleware.WriteJSONErrorMsg(w, err.Error(), http.StatusInternalServerError)
+			middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
 			return
 		}
 		w.WriteHeader(http.StatusOK)
@@ -380,7 +378,237 @@ func ShopsMeMembers(w http.ResponseWriter, r *http.Request) {
 		}
 		if err := db.Where("id = ? AND shop_id = ? AND company_id = ?", body.ID, shopID, companyID).
 			Delete(&model.User{}).Error; err != nil {
-			middleware.WriteJSONErrorMsg(w, err.Error(), http.StatusInternalServerError)
+			middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+
+	default:
+		middleware.WriteJSONError(w, middleware.ErrMethodNotAllowed, http.StatusMethodNotAllowed)
+	}
+}
+
+// ShopListItem is returned by GET /api/shops.
+type ShopListItem struct {
+	ID          string    `json:"id"`
+	CompanyID   string    `json:"company_id"`
+	Name        string    `json:"name"`
+	MemberCount int       `json:"member_count"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// ListShops handles GET /api/shops — returns shops scoped to the caller's tenant.
+// Root sees all shops (except the default Root shop).
+// SuperAdmin/Admin see only shops belonging to their company.
+func ListShops(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		middleware.WriteJSONError(w, middleware.ErrMethodNotAllowed, http.StatusMethodNotAllowed)
+		return
+	}
+	ctx := middleware.GetContext(r.Context())
+	if ctx == nil {
+		middleware.WriteJSONError(w, middleware.ErrForbidden, http.StatusForbidden)
+		return
+	}
+	db := database.DB()
+	if db == nil {
+		middleware.WriteJSONError(w, "service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	var shops []model.Shop
+	query := db.Where("deleted_at IS NULL")
+	if ctx.Role == auth.RoleRoot {
+		// Root sees all tenants' shops, excluding the Root default shop
+		query = query.Where("id != ?", defaultRootShopID)
+	} else {
+		// Tenant-scoped: only see shops within own company
+		query = query.Where("company_id = ?", ctx.CompanyID)
+	}
+	if err := query.Order("created_at DESC").Find(&shops).Error; err != nil {
+		middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
+		return
+	}
+	items := make([]ShopListItem, 0, len(shops))
+	for _, s := range shops {
+		var count int64
+		db.Model(&model.User{}).Where("shop_id = ? AND deleted_at IS NULL", s.ID).Count(&count)
+		items = append(items, ShopListItem{
+			ID:          s.ID,
+			CompanyID:   s.CompanyID,
+			Name:        s.Name,
+			MemberCount: int(count),
+			CreatedAt:   s.CreatedAt,
+		})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(items)
+}
+
+// GetShopByID handles GET /api/shops/{id} — Root sees any shop; others only see shops in their company.
+func GetShopByID(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		middleware.WriteJSONError(w, middleware.ErrMethodNotAllowed, http.StatusMethodNotAllowed)
+		return
+	}
+	ctx := middleware.GetContext(r.Context())
+	if ctx == nil {
+		middleware.WriteJSONError(w, middleware.ErrForbidden, http.StatusForbidden)
+		return
+	}
+	shopID := r.PathValue("id")
+	if shopID == "" {
+		middleware.WriteJSONError(w, "shop id required", http.StatusBadRequest)
+		return
+	}
+	db := database.DB()
+	if db == nil {
+		middleware.WriteJSONError(w, "service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	var shop model.Shop
+	query := db.Where("id = ? AND deleted_at IS NULL", shopID)
+	// Non-root must be scoped to their own company
+	if ctx.Role != auth.RoleRoot {
+		query = query.Where("company_id = ?", ctx.CompanyID)
+	}
+	if err := query.First(&shop).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			middleware.WriteJSONError(w, "shop not found", http.StatusNotFound)
+			return
+		}
+		middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
+		return
+	}
+	var users []model.User
+	if err := db.Where("shop_id = ? AND company_id = ? AND deleted_at IS NULL", shopID, shop.CompanyID).Find(&users).Error; err != nil {
+		middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
+		return
+	}
+	members := make([]MemberItem, 0, len(users))
+	for _, u := range users {
+		members = append(members, MemberItem{ID: u.ID, Email: u.Email, Role: u.Role})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(ShopsMeResponse{Name: shop.Name, Members: members})
+}
+
+// ShopMembersByID handles POST/PATCH/DELETE /api/shops/{id}/members — Root only;
+// non-Root can only manage shops in their own company.
+func ShopMembersByID(w http.ResponseWriter, r *http.Request) {
+	ctx := middleware.GetContext(r.Context())
+	if ctx == nil {
+		middleware.WriteJSONError(w, middleware.ErrForbidden, http.StatusForbidden)
+		return
+	}
+	shopID := r.PathValue("id")
+	if shopID == "" {
+		middleware.WriteJSONError(w, "shop id required", http.StatusBadRequest)
+		return
+	}
+	db := database.DB()
+	if db == nil {
+		middleware.WriteJSONError(w, "service unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	var shop model.Shop
+	shopQuery := db.Where("id = ? AND deleted_at IS NULL", shopID)
+	// Non-Root: enforce tenant scope — can only manage shops within own company
+	if ctx.Role != auth.RoleRoot {
+		shopQuery = shopQuery.Where("company_id = ?", ctx.CompanyID)
+	}
+	if err := shopQuery.First(&shop).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			middleware.WriteJSONError(w, "shop not found", http.StatusNotFound)
+			return
+		}
+		middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
+		return
+	}
+	companyID := shop.CompanyID
+
+	switch r.Method {
+	case http.MethodPost:
+		var body PostShopsMeMembersRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			middleware.WriteJSONError(w, middleware.ErrInvalidJSON, http.StatusBadRequest)
+			return
+		}
+		email := strings.TrimSpace(body.Email)
+		if email == "" || body.Password == "" {
+			middleware.WriteJSONError(w, "email and password required", http.StatusBadRequest)
+			return
+		}
+		if body.Role != "Admin" && body.Role != "Affiliate" && body.Role != "SuperAdmin" {
+			middleware.WriteJSONError(w, "invalid role", http.StatusBadRequest)
+			return
+		}
+		hash, err := auth.HashPassword(body.Password)
+		if err != nil {
+			middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
+			return
+		}
+		uid := newID()
+		u := model.User{
+			ID:           uid,
+			Email:        email,
+			PasswordHash: hash,
+			Role:         body.Role,
+			Tier:         "free",
+			ShopID:       &shopID,
+			CompanyID:    companyID,
+		}
+		if err := db.Create(&u).Error; err != nil {
+			if strings.Contains(err.Error(), "unique") || strings.Contains(err.Error(), "duplicate") {
+				middleware.WriteJSONError(w, "email already exists", http.StatusBadRequest)
+				return
+			}
+			middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(MemberItem{ID: u.ID, Email: u.Email, Role: u.Role})
+
+	case http.MethodPatch:
+		var body struct {
+			ID   string `json:"id"`
+			Role string `json:"role"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			middleware.WriteJSONError(w, middleware.ErrInvalidJSON, http.StatusBadRequest)
+			return
+		}
+		if body.ID == "" {
+			middleware.WriteJSONError(w, "id required", http.StatusBadRequest)
+			return
+		}
+		if body.Role != "Admin" && body.Role != "Affiliate" && body.Role != "SuperAdmin" {
+			middleware.WriteJSONError(w, "invalid role", http.StatusBadRequest)
+			return
+		}
+		if err := db.Model(&model.User{}).
+			Where("id = ? AND shop_id = ? AND company_id = ?", body.ID, shopID, companyID).
+			Update("role", body.Role).Error; err != nil {
+			middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+
+	case http.MethodDelete:
+		var body struct {
+			ID string `json:"id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			middleware.WriteJSONError(w, middleware.ErrInvalidJSON, http.StatusBadRequest)
+			return
+		}
+		if body.ID == "" {
+			middleware.WriteJSONError(w, "id required", http.StatusBadRequest)
+			return
+		}
+		if err := db.Where("id = ? AND shop_id = ? AND company_id = ?", body.ID, shopID, companyID).
+			Delete(&model.User{}).Error; err != nil {
+			middleware.WriteJSONError(w, middleware.ErrInternal, http.StatusInternalServerError)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)

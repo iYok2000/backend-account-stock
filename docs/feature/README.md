@@ -19,7 +19,10 @@
 | [01-auth.md](./01-auth.md) | Auth / session | `GET /api/auth/me` |
 | [02-users.md](./02-users.md) | จัดการผู้ใช้ (SuperAdmin) | `GET /api/users` (และ CRUD เมื่อมี) |
 | [03-import.md](./03-import.md) | Import → Inventory | `POST /api/inventory/import`, `GET /api/inventory`, `GET /api/inventory/summary` (Auth + inventory:create/read) |
+| [05-dashboard.md](./05-dashboard.md) | Dashboard | `GET /api/dashboard/overview`, `/kpis`, `/revenue-7d`, `/low-stock` (Auth + dashboard:read) |
+| [06-analytics.md](./06-analytics.md) | Analytics | `GET /api/analytics/reconciliation`, `/daily-metrics`, `/product-metrics`, `/trends`, `/profitability` (Auth + analytics:read) |
 | [06-invites.md](./06-invites.md) | Invite System (Tier) | `POST /api/invite/validate`, `/api/admin/invites`, `/api/admin/system-config` (Public, Auth, Admin) |
+| [07-calculator.md](./07-calculator.md) | Fee Calculator | `POST /api/calculator/fees`, `/api/calculator/fees/batch` (Auth + analytics:read) |
 
 ฟีเจอร์อื่น (inventory, orders, suppliers, …) จะเพิ่มเมื่อมี endpoint นั้นใน backend.
 
